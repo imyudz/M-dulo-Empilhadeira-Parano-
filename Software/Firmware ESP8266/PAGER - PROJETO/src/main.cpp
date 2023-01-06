@@ -7,10 +7,8 @@
     4-PARADO
     5-FINALIZADO
     6-DESCONECTADO COM OPERAÇÃO EM ANDAMENTO
+    7-PARADA FINALIZADA
 */
-
-
-
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -23,7 +21,6 @@
 #include        <PubSubClient.h>     //MQTT
 #include        <WiFiClient.h>       //MQTT
 #include        <ESP8266WiFi.h>      //WiFi
-#include        "OLEDDisplayUi.h"    //UI do Display (não utilizada até o momento nesta versão)
 #include        <Preferences.h>      //EEPROM
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -92,7 +89,6 @@ unsigned long tempo_botao = millis();
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //Adafruit_SSD1306 display(128, 64, &Wire, -1);
 SSD1306Wire display(0x3c, SDA, SCL);
-OLEDDisplayUi ui     ( &display );
 //variaveis menu
 byte navegacao_status = 0; //controla em qual página do MENU o dispositivo se encontra durante a navegação
 byte altera_parametros = 0; //indica o parâmtro que está sendo atualizado
@@ -122,14 +118,18 @@ int selecionadoOP = 0;
 int navegadoOP = -1;
 int selecionadoParada = 0;
 int navegadoParada = -1;
+int selecionadoFinalParada = 0;
+int navegadoFinalParada = -1;
 unsigned long ultimoEnvio = 0;
 unsigned long ultimoEnvio2 = 0;
 unsigned long ultimoEnvio3 = 0;
 unsigned long ultimoEnvio4 = 0;
 unsigned long ultimoEnvio5 = 0;
 unsigned long ultimoEnvio6 = 0;
+unsigned long ultimoEnvio7 = 0;
 unsigned long ultimaChamada = 0;
 int salva_ponto;
+int estado_antes_parada = 0;
 boolean desconexaoPendente = false;
 
 
@@ -259,8 +259,8 @@ void menu_selecionaEmOperacao(){ //MENU PARA SELECIONAR A AÇÃO ENQUANTO ESTIVE
 void menu_motivoParada(){ //MENU PARA SELECIONAR A AÇÃO ENQUANTO ESTIVER EM OPERAÇÃO (STATUS = 2)
   
   int y_pos = 20;
-  const char *opcoes[13] = {
-    "MANUT MEC",   
+  const char *opcoes[14] = {
+    "VOLTAR",   
     "MANUT EL",     
     "BANHEIRO",     
     "REFEICAO",     
@@ -280,7 +280,7 @@ void menu_motivoParada(){ //MENU PARA SELECIONAR A AÇÃO ENQUANTO ESTIVER EM OP
     display.setFont(ArialMT_Plain_10);
     display.setColor(WHITE);
     display.drawString(0, 0,"ESCOLHA UMA OPÇÃO");
-    for (int i = 0; i < 13; i++) {
+    for (int i = 0; i < 14; i++) {
       if (i == selecionadoParada) {
         display.setTextAlignment(TEXT_ALIGN_LEFT);
         display.setFont(ArialMT_Plain_16);
@@ -315,6 +315,40 @@ void menu_motivoParada(){ //MENU PARA SELECIONAR A AÇÃO ENQUANTO ESTIVER EM OP
           display.drawString(20 , y_pos, opcoes[i]);
           y_pos += 15;
         }
+      }
+    }
+  }
+  display.display();
+}
+
+void menu_confirmaFinalParada(){//MENU PARA CONFIRMR SE QUER OU NÃO O FINAL DA PARADA
+  int y_pos = 22;
+  const char *opcoes[2] = {
+    " SIM",
+    " NÃO"
+  };
+
+  if (navegadoFinalParada == -1) {
+    display.clear();
+    display.setTextAlignment(TEXT_ALIGN_LEFT);
+    display.setFont(ArialMT_Plain_10);
+    display.setColor(WHITE);
+    display.drawString(0, 0,"FINALIZAR PARADA?");
+    for (int i = 0; i < 2; i++) {
+      if (i == selecionadoFinalParada) {
+        display.setTextAlignment(TEXT_ALIGN_LEFT);
+        display.setFont(ArialMT_Plain_16);
+        display.drawString(20, y_pos, ">");
+        display.drawString(27, y_pos, opcoes[i]);
+        y_pos += 20;
+        Serial.println(opcoes[i]);
+
+      } else if (i != selecionadoFinalParada) {
+        display.setTextAlignment(TEXT_ALIGN_LEFT);
+        display.setFont(ArialMT_Plain_16);
+        display.setColor(WHITE);
+        display.drawString(22, y_pos, opcoes[i]);
+        y_pos+= 20;
       }
     }
   }
@@ -379,6 +413,7 @@ void controle_menu(bool cima, bool enter, bool baixo) { //controla a navegação
         navegacao_status = 10;
       }
       else if (navegado == 2){
+        estado_antes_parada = navegacao_status;
         navegacao_status = 85;
       }
     }
@@ -439,6 +474,11 @@ void controle_menu(bool cima, bool enter, bool baixo) { //controla a navegação
       else if (navegadoOP == 2)
       {
         navegacao_status = 70;
+      }
+      else if (navegadoOP == 3)
+      {
+        estado_antes_parada = navegacao_status;
+        navegacao_status = 85;
       }
     } 
   }
@@ -504,24 +544,72 @@ void controle_menu(bool cima, bool enter, bool baixo) { //controla a navegação
       // "TESTE MANUT",  
       // "AGUARD EMPILH",
       
-      if      (navegadoParada == 0)   cod_parada = MANUT_MEC;
-      else if (navegadoParada == 1)   cod_parada = MANUT_EL;
-      else if (navegadoParada == 2)   cod_parada = BANHEIRO;
-      else if (navegadoParada == 3)   cod_parada = REFEICAO;
-      else if (navegadoParada == 4)   cod_parada = AUDITORIA;
-      else if (navegadoParada == 5)   cod_parada = TREINAMENTO;
-      else if (navegadoParada == 6)   cod_parada = TRY_OUT;
-      else if (navegadoParada == 7)   cod_parada = FALTA_ABASTEC;
-      else if (navegadoParada == 8)   cod_parada = MANUT_PREV;
-      else if (navegadoParada == 9)   cod_parada = TESTES_DIV;
-      else if (navegadoParada == 10)  cod_parada = NAO_APONTADO;
-      else if (navegadoParada == 11)  cod_parada = TESTE_MANUT;
-      else if (navegadoParada == 12)  cod_parada = AGUARD_EMPILH;
+      if      (navegadoParada == 0){  navegacao_status = estado_antes_parada; estado_antes_parada = 0;}
+      else if (navegadoParada == 1)   cod_parada = MANUT_MEC;
+      else if (navegadoParada == 2)   cod_parada = MANUT_EL;
+      else if (navegadoParada == 3)   cod_parada = BANHEIRO;
+      else if (navegadoParada == 4)   cod_parada = REFEICAO;
+      else if (navegadoParada == 5)   cod_parada = AUDITORIA;
+      else if (navegadoParada == 6)   cod_parada = TREINAMENTO;
+      else if (navegadoParada == 7)   cod_parada = TRY_OUT;
+      else if (navegadoParada == 8)   cod_parada = FALTA_ABASTEC;
+      else if (navegadoParada == 9)   cod_parada = MANUT_PREV;
+      else if (navegadoParada == 10)  cod_parada = TESTES_DIV;
+      else if (navegadoParada == 11)  cod_parada = NAO_APONTADO;
+      else if (navegadoParada == 12)  cod_parada = TESTE_MANUT;
+      else if (navegadoParada == 13)  cod_parada = AGUARD_EMPILH;
 
       if(!cod_parada.equals("")){
         navegacao_status = 95;
       }
       Serial.println(cod_parada);
+    }
+  }
+  else if (navegacao_status == 100)
+  {
+    if(enter) navegacao_status = 105;
+  }
+  else if (navegacao_status == 105)
+  {
+    if (cima && baixo) { //BOTÕES APERTADOS AO MESMO TEMPO
+    };
+    if (cima) {
+      selecionadoFinalParada = selecionadoFinalParada + 1;
+      delay(200);
+      if(selecionadoFinalParada == 1){
+        if (baixo)
+        {
+          selecionadoFinalParada = selecionadoFinalParada - 1;
+        }
+      }
+      if (selecionadoFinalParada == 0)
+      {
+        if(cima)
+        {
+          selecionadoFinalParada = selecionadoFinalParada + 1;
+        }
+      }
+      if(selecionadoFinalParada > 1){
+        selecionadoFinalParada = 0;
+      }
+    };
+    if (baixo) {
+      selecionadoFinalParada = selecionadoFinalParada - 1;
+      delay(200);
+      if(selecionadoFinalParada < 0){
+        selecionadoFinalParada = 0;
+      }
+    };
+    if (enter){
+      navegadoFinalParada = selecionadoFinalParada;
+      //if (baixo) navegadoFinalParada = navegadoFinalParada - 1;
+      if (navegadoFinalParada == 0)
+      {
+        navegacao_status = 110;
+      }
+      else if (navegadoFinalParada == 1){
+        navegacao_status = 100;
+      }
     }
   }
 }
@@ -809,6 +897,10 @@ void controle_display(String status_sistema, int estado_mqtt) { //responsável a
           navegacao_status = 40;
         }
       }
+      else if (status_chamada.equals("4"))
+      {
+        navegacao_status = 100;
+      }
       else if(EEPROMdata.getFloat(EEPROM_ENDERECO_SOLICITACOES, 0) == 0)
       {
         Serial.println("RECEBI 0, VOLTANDO PARA 10");
@@ -862,6 +954,22 @@ void controle_display(String status_sistema, int estado_mqtt) { //responsável a
       display.drawString(64, 12, "ENTER P/");
       display.drawString(64, 36, "FINALIZAR");
       display.display();
+    break;
+    case 105:
+      navegadoFinalParada = -1;
+      display.clear();
+      menu_confirmaFinalParada();
+    break;
+    case 110:
+      if(millis() - ultimoEnvio7 >= 1500){
+        MQTT.publish(COD_PARADA.c_str(), "0");
+        MQTT.publish(STATUS_PAGER.c_str(), "7");
+        ultimoEnvio7 = millis();
+      }
+      if (status_chamada.equals("7"))
+      {
+        navegacao_status = 10;
+      }
     break;
     default:
       Serial.print("Default");
@@ -1161,7 +1269,7 @@ void loop() {
   controle_navegacao(btcima, btenter, btbaixo);
 
   //Serial.print("|||||||||");
-  //Serial.println(navegacao_status);
+  Serial.println(navegacao_status);
   //Serial.println(local);
   //Serial.println(produto);
   //Serial.println(status_chamada);
@@ -1169,7 +1277,7 @@ void loop() {
   //Serial.print(digitalRead(btcima));
   //Serial.print(digitalRead(btbaixo));
   //Serial.println(digitalRead(btenter));
-  //Serial.println(selecionado);
+  Serial.println(selecionadoFinalParada);
   //Controle de Aparições no Display
   controle_display(sts_sistema, MQTT.state());
 }
