@@ -22,6 +22,7 @@
 #include        <WiFiClient.h>       //MQTT
 #include        <ESP8266WiFi.h>      //WiFi
 #include        <Preferences.h>      //EEPROM
+#include        <neotimer.h>         //Substituição do Millis
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //                                            CÓDIGO DE PARADAS                                            //
@@ -82,6 +83,7 @@ unsigned long tempo_botao = millis();
 #define btenter 0 //D6
 #define buzzer 14
 #define DEBOUNCE_BOTAO 300
+#define QUANT_VEZES_BUZZER 4
 
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -103,6 +105,12 @@ String produtoDisplay; //recebe o produto que foi atribuido
 #define EEPROM_ENDERECO_SOLICITACOES "id_solicitacoes"
 Preferences EEPROMdata;
 float id_solicitacoes;
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////
+//                                       Configurações NEOTIMER                                       //
+///////////////////////////////////////////////////////////////////////////////////////////////////////
+Neotimer tempoBuzzerLigado = Neotimer(70);
+Neotimer tempoBuzzerDesligado = Neotimer(70);
 
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -128,6 +136,7 @@ unsigned long ultimoEnvio5 = 0;
 unsigned long ultimoEnvio6 = 0;
 unsigned long ultimoEnvio7 = 0;
 unsigned long ultimaChamada = 0;
+unsigned long tempoToque = 0;
 int salva_ponto;
 int estado_antes_parada = 0;
 boolean desconexaoPendente = false;
@@ -145,6 +154,25 @@ const unsigned char PROGMEM logo_dw [] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x
 //                                         Códigos das Funções                                              //
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////
 void (*funcReset)() = 0;
+
+void apitaBuzzer(){
+  for (int i = 0; i < QUANT_VEZES_BUZZER; i++)
+  {
+    //LÓGICA EM TESTE:
+    /*  tempoBuzzerLigado.start();
+      if(tempoBuzzerLigado.waiting()) digitalWrite(buzzer, HIGH);
+      if(tempoBuzzerLigado.done()){ digitalWrite(buzzer, LOW); tempoBuzzerDesligado.start();}
+      if(tempoBuzzerDesligado.waiting()) digitalWrite(buzzer, LOW);
+      if(tempoBuzzerDesligado.done()) tempoBuzzerLigado.reset();
+      tempoBuzzerDesligado.reset();
+    */
+    digitalWrite(buzzer, HIGH);
+    delay(60);
+    digitalWrite(buzzer, LOW);
+    delay(60);
+  }
+}
+
 
 void menu_seleciona(){//MENU PARA SELECIONAR A AÇÃO QUANDO APARECE UMA CHAMADA
   int y_pos = 22;
@@ -748,6 +776,7 @@ void controle_display(String status_sistema, int estado_mqtt) { //responsável a
       
     break;
     case 11:
+      apitaBuzzer();
       //Serial.print("ESTOU NO CASE 11");
       display.clear();        //limpa display
       display.setTextAlignment(TEXT_ALIGN_LEFT);
@@ -887,8 +916,8 @@ void controle_display(String status_sistema, int estado_mqtt) { //responsável a
       display.drawString(0, 0, "Aguarde...");
       display.setTextAlignment(TEXT_ALIGN_CENTER);
       display.setFont(ArialMT_Plain_24);
-      display.drawString(64, 12, "Retornando");
-      display.drawString(64, 36, "Operação");
+      display.drawString(64, 12, "AGUARDO");
+      display.drawString(64, 36, "SISTEMA");
       display.display();
       if(status_chamada.equals("2")){
         if (millis() - ultimoEnvio5 >= 3000)
@@ -912,7 +941,11 @@ void controle_display(String status_sistema, int estado_mqtt) { //responsável a
       }
       else
       {
-        Serial.println("AGUARDO DO MQTT --> DADO NA MEMÓRIA: " + (String)EEPROMdata.getFloat(EEPROM_ENDERECO_SOLICITACOES, 0));
+        int flag = 1;
+        if(flag == 1){ // Só para não ler a memória toda hora
+          Serial.println("AGUARDO DO MQTT --> DADO NA MEMÓRIA: " + (String)EEPROMdata.getFloat(EEPROM_ENDERECO_SOLICITACOES, 0));
+          flag = 2;
+        }
         funcReset();
       }
       EEPROMdata.end();
@@ -1009,8 +1042,7 @@ void conectaWiFi(){
     Serial.print(ssid);  
     Serial.print("  IP obtido: ");
     Serial.println(WiFi.localIP()); 
-
-
+    
     display.clear();        //limpa display
     display.display();      //efeuta operações
     display.setTextAlignment(TEXT_ALIGN_LEFT);
@@ -1023,7 +1055,6 @@ void conectaWiFi(){
     display.display();
     delay(4000);   
 }
-
 
 void connectMQTT() {
 
@@ -1146,7 +1177,7 @@ void callback(char* topic, byte* payload, unsigned int length) {
       if (topico.equals(SOLICITACAO))
       {
         solicitacao = "";
-        for(int i = 0; i< length; i++){
+        for(int i = 0; i < length; i++){
           Serial.print((char)payload[i]);
           solicitacao = solicitacao + (char)+payload[i];
         }
@@ -1282,5 +1313,3 @@ void loop() {
   //Controle de Aparições no Display
   controle_display(sts_sistema, MQTT.state());
 }
-
-
