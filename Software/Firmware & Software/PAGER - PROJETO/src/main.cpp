@@ -57,20 +57,23 @@ WiFiClient wifiClient;
 //                                      Configuração MQTT
 ////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //*************************SERVER:
-const char* BROKER_MQTT = "192.168.0.13"; // URL DO BROKER que se deseja utilizar, nese caso o broker da eclipse
+//const char* BROKER_MQTT = "192.168.0.82"; // URL OU IP DO BROKER que se deseja utilizar -- SERVIDOR DE FUNCIONAMENTO
+const char* BROKER_MQTT = "192.168.0.13"; // URL OU IP DO BROKER que se deseja utilizar -- SERVIDOR DE TESTE
+//const char* BROKER_MQTT = "broker.hivemq.com"; // URL OU IP DO BROKER que se deseja utilizar -- SERVIDOR DE TESTE
 int BROKER_PORT = 1883; //Porta do BROKER MQTT
 #define MQTTsubQos  1   //qos of subscribe
 #define MQTTpubQos  1   //qos of subscribe
 //*************************CLIENT:
 PubSubClient MQTT(wifiClient); //Instancia objeto MQTT que se vincula ao objeto do espClient
 //****************DEFINE OS TÓPICOS DESSE PAGER
-#define TOPIC_PUBLISH "PG1/STATUS"
+#define TOPIC_PUBLISH "PG2/STATUS"
 const char* PAGER_NAME = "PG2";
 String STATUS_PAGER = (String)PAGER_NAME+"/STATUS";
 String UNIDADE = (String)PAGER_NAME+"/LOCAL";
 String PRODUTO = (String)PAGER_NAME+"/PRODUTO";
 String SOLICITACAO = (String)PAGER_NAME+"/SOLICITACAO";
 String COD_PARADA = (String)PAGER_NAME+"/CODPARADA";
+String ETIQ_MONTARACK = (String)PAGER_NAME+"/ETIQ_MONTARACK";
 
 
 ///////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -102,7 +105,9 @@ String produtoDisplay; //recebe o produto que foi atribuido
 //                                       Configurações EEPROM                                         //
 ////////////////////////////////////////////////////////////////////////////////////////////////////////
 #define EEPROM_SOLICITACOES "blocoSolicitacoes"
+#define EEPROM_ETIQUETA "blocoEtiqueta"
 #define EEPROM_ENDERECO_SOLICITACOES "id_solicitacoes"
+#define EEPROM_ENDERECO_ETIQUETA "cod_etiquetaMontaRack"
 Preferences EEPROMdata;
 float id_solicitacoes;
 
@@ -120,6 +125,7 @@ String status_chamada = "";
 String produto = "";
 String local = "";
 String solicitacao = "";
+String etiq_montaRack = "";
 int selecionado = 0;
 int navegado = -1;
 int selecionadoOP = 0;
@@ -129,16 +135,18 @@ int navegadoParada = -1;
 int selecionadoFinalParada = 0;
 int navegadoFinalParada = -1;
 unsigned long ultimoEnvio = 0;
+unsigned long ultimoEnvio1 = millis();
 unsigned long ultimoEnvio2 = 0;
 unsigned long ultimoEnvio3 = 0;
 unsigned long ultimoEnvio4 = 0;
-unsigned long ultimoEnvio5 = 0;
+unsigned long ultimoEnvio5 = millis();
 unsigned long ultimoEnvio6 = 0;
 unsigned long ultimoEnvio7 = 0;
 unsigned long ultimaChamada = 0;
-unsigned long tempoToque = 0;
+unsigned long esperaRetornoReinicio = millis();
 int salva_ponto;
 int estado_antes_parada = 0;
+int flag = 0;
 boolean desconexaoPendente = false;
 
 
@@ -776,7 +784,7 @@ void controle_display(String status_sistema, int estado_mqtt) { //responsável a
       
     break;
     case 11:
-      apitaBuzzer();
+      //apitaBuzzer();
       //Serial.print("ESTOU NO CASE 11");
       display.clear();        //limpa display
       display.setTextAlignment(TEXT_ALIGN_LEFT);
@@ -807,29 +815,40 @@ void controle_display(String status_sistema, int estado_mqtt) { //responsável a
       //////////////////////*******CONFIG ENVIA MQTT*****////////////////////////////
       //Após a aceitação do pedido, atualiza as informações da chamada no driver
       MQTT.publish(STATUS_PAGER.c_str(), "2");
-      
-      if(status_chamada.equals("2")){
-        navegacao_status = 40;
+        if(status_chamada.equals("2")){
+          flag = 0;
+          navegacao_status = 40;
+        }
+        else
+        {
+          navegacao_status = 30;
+        }
       }
-      else
-      {
-        navegacao_status = 30;
-      }
-      Serial.println("fIM DO 30");      
-    }
     break;
     case 40:
       //////////////////////*******CONFIG Display*****////////////////////////////
+      EEPROMdata.begin(EEPROM_ETIQUETA);
       display.clear();
+      if( flag > 2 ){
+        etiq_montaRack =  EEPROMdata.getString(EEPROM_ENDERECO_ETIQUETA, "0");
+        Serial.print(etiq_montaRack);
+        flag++;
+      }
       display.setTextAlignment(TEXT_ALIGN_LEFT);
       display.setFont(ArialMT_Plain_10);
       display.drawString(0, 0, "EM OPERAÇÃO");
       display.setTextAlignment(TEXT_ALIGN_CENTER);
       display.setFont(ArialMT_Plain_24);
       display.drawString(64, 12, "BUSQUE");
-      display.drawString(64, 36, "PRODUTO");
+      if (!EEPROMdata.getString(EEPROM_ENDERECO_ETIQUETA, "0").equals("0")){
+        display.drawString(64, 36, EEPROMdata.getString(EEPROM_ENDERECO_ETIQUETA, "0"));
+      }
+      else
+      {
+        display.drawString(64, 36, "PRODUTO");
+      }
       display.display();
-      //USANDO DELAY, MAS ADAPTAR PARA BIBLIOTECA NEOTIMER
+      EEPROMdata.end();
     break;
     case 45:
       navegadoOP = -1;
@@ -867,11 +886,11 @@ void controle_display(String status_sistema, int estado_mqtt) { //responsável a
       display.display();
       //MQTT.publish(STATUS_PAGER.c_str(), "1");
       if(status_chamada.equals("1")){
-        navegacao_status = 10;
-      }else{
-        //delay(500);
-        //navegacao_status = 10;
-      }
+        if(ultimoEnvio1 - millis() > 2000){
+          navegacao_status = 10;
+          ultimoEnvio1 = millis();
+        }
+      }else{/*.  .  . */}
     break;
     case 70:
     {
@@ -919,8 +938,9 @@ void controle_display(String status_sistema, int estado_mqtt) { //responsável a
       display.drawString(64, 12, "AGUARDO");
       display.drawString(64, 36, "SISTEMA");
       display.display();
+      
       if(status_chamada.equals("2")){
-        if (millis() - ultimoEnvio5 >= 3000)
+        if ((millis() - ultimoEnvio5) > 3000)
         {
           ultimoEnvio5 = millis();
           navegacao_status = 40;
@@ -942,11 +962,13 @@ void controle_display(String status_sistema, int estado_mqtt) { //responsável a
       else
       {
         int flag = 1;
-        if(flag == 1){ // Só para não ler a memória toda hora
+        if(flag == 1 and ((millis() - esperaRetornoReinicio) > 20000)){ // Só para não ler a memória toda hora
           Serial.println("AGUARDO DO MQTT --> DADO NA MEMÓRIA: " + (String)EEPROMdata.getFloat(EEPROM_ENDERECO_SOLICITACOES, 0));
           flag = 2;
+          funcReset();
+          esperaRetornoReinicio = millis();
         }
-        funcReset();
+        EEPROMdata.end();
       }
       EEPROMdata.end();
     break;
@@ -1096,6 +1118,7 @@ void connectMQTT() {
       MQTT.subscribe(STATUS_PAGER.c_str(), MQTTsubQos);
       MQTT.subscribe(SOLICITACAO.c_str(), MQTTsubQos);
       //MQTT.subscribe(COD_PARADA.c_str(), MQTTsubQos);
+      MQTT.subscribe(ETIQ_MONTARACK.c_str(), MQTTsubQos);
       delay(500);
       //Uma vez conectado, publica que está disponível para o ELIPSE
       MQTT.publish(STATUS_PAGER.c_str(), "1");
@@ -1164,13 +1187,13 @@ void callback(char* topic, byte* payload, unsigned int length) {
           Serial.print((char)payload[i]);
           produto = produto + (char)+payload[i];
         }
-        
         Serial.println("Produto: "+produto);
         if (produto.equals("EMBALAGEM"))
         {
           produto = "EMBLG";
           Serial.println("EMBLG");
         }
+
         produtoDisplay = produto;
         Serial.println(produto);
       }
@@ -1189,10 +1212,34 @@ void callback(char* topic, byte* payload, unsigned int length) {
         Serial.println("O que tem antes da escrita na memória: " + (String)EEPROMdata.getFloat(EEPROM_ENDERECO_SOLICITACOES, 0));   //Verifica o que há na memória antes de escrever
         if(EEPROMdata.putFloat(EEPROM_ENDERECO_SOLICITACOES, id_solicitacoes) == 0)
         {
-            Serial.println("ERRO NA ESCRITA");   //Verifica o que há na memória antes de escrever
+          Serial.println("ERRO NA ESCRITA");   //Verifica o que há na memória antes de escrever
         }
         Serial.println("O que tem depois da escrita na memória: " + (String)EEPROMdata.getFloat(EEPROM_ENDERECO_SOLICITACOES, 0));  //Verifica se realmente escreveu
         EEPROMdata.end();
+      }
+      if (topico.equals(ETIQ_MONTARACK))
+      {
+        etiq_montaRack = "";
+        for(int i = 0; i < length; i++){
+          Serial.print((char)payload[i]);
+          etiq_montaRack = etiq_montaRack + (char)+payload[i];
+        }
+        Serial.println("\nETIQUETA MONTARACK: " +etiq_montaRack);
+        if(produto.equals("EMBLG")){
+          //TODA VEZ QUE RECEBER ALGUM DADO DA ETIQUETA, GRAVA ELA NA EEPROM:
+          EEPROMdata.begin(EEPROM_ETIQUETA);
+          Serial.println("O que tem antes da escrita na ETIQUETA: " + (String)EEPROMdata.getString(EEPROM_ENDERECO_ETIQUETA, "0"));   //Verifica o que há na memória antes de escrever
+          etiq_montaRack = EEPROMdata.putString(EEPROM_ENDERECO_ETIQUETA, etiq_montaRack) == 0;
+
+          if(etiq_montaRack.equals("0"))
+          {
+            Serial.println("ETIQUETA VAZIA");   //Verifica o que há na memória antes de escrever
+          }
+
+          Serial.println("O que tem depois da escrita na memória: " + (String)EEPROMdata.getString(EEPROM_ENDERECO_ETIQUETA, "0"));  //Verifica se realmente escreveu
+          EEPROMdata.end();
+        }
+        else{}
       }
     }else{
       navegacao_status = 10;
@@ -1240,7 +1287,8 @@ void processaDesconexoes() {
 }
 
 
-void verificaMemoria(float solicitacao){ //Toda vez que ligar, verificará se algo está escrito na EEPROM, e se estiver, ele manda um novo status para o ELIPSE
+void verificaMemoria(float solicitacao, String etiqueta){ //Toda vez que ligar, verificará se algo está escrito na EEPROM, e se estiver, ele manda um novo status para o ELIPSE
+  EEPROMdata.begin(EEPROM_ETIQUETA);
   if(solicitacao != 0)
   {
     Serial.println("Algo na Memória: ");
@@ -1249,6 +1297,15 @@ void verificaMemoria(float solicitacao){ //Toda vez que ligar, verificará se al
   }
   else{
     Serial.println("Nada na Memória");
+  }
+  if(etiqueta != 0)
+  {
+    Serial.println("(ETIQUETA) Algo na Memória: ");
+    Serial.println(etiqueta);
+    etiq_montaRack = etiqueta;
+  }
+  else{
+    Serial.println("Não há etiqueta na Memória");
   }
   EEPROMdata.end();
 }
@@ -1286,9 +1343,10 @@ void setup() {
   Serial.println(WiFi.macAddress());
   
   //Configurações de EEPROM
-  EEPROMdata.begin(EEPROM_SOLICITACOES);//Inicia a meória, criando um bloco de dados dentro dela
+  EEPROMdata.begin(EEPROM_SOLICITACOES);//Inicia a memória, criando um bloco de dados dentro dela
+  EEPROMdata.begin(EEPROM_ETIQUETA);
   //EEPROMdata.putFloat(EEPROM_ENDERECO_SOLICITACOES, 0);   //usado para limpar a memória nos testes
-  verificaMemoria(EEPROMdata.getFloat(EEPROM_ENDERECO_SOLICITACOES, 0));
+  verificaMemoria(EEPROMdata.getFloat(EEPROM_ENDERECO_SOLICITACOES, 0), EEPROMdata.getString(EEPROM_ENDERECO_ETIQUETA, "0"));
   //Configurações de tags
   sts_sistema = ""; //futuramente receberá o conteúdo de verificação de conexões do sistema
 }
@@ -1299,17 +1357,18 @@ void loop() {
 
   //Controle de Botões Para Menu
   controle_navegacao(btcima, btenter, btbaixo);
-
+  //**DEBUG**//
   //Serial.print("|||||||||");
-  Serial.println(navegacao_status);
-  //Serial.println(local);
-  //Serial.println(produto);
-  //Serial.println(status_chamada);
-  // Serial.println(navegadoOP);
+  //Serial.println("Navegação Status: "+navegacao_status);
+  //Serial.println("Local: "+local);
+  //Serial.println("Produto: "+produto);
+  //Serial.println("Status chamada: "+status_chamada);
+  //Serial.println("Navegado MENU OP: "+navegadoOP);
   //Serial.print(digitalRead(btcima));
   //Serial.print(digitalRead(btbaixo));
   //Serial.println(digitalRead(btenter));
-  Serial.println(selecionadoFinalParada);
+  //Serial.println(selecionadoFinalParada);
+
   //Controle de Aparições no Display
   controle_display(sts_sistema, MQTT.state());
 }
